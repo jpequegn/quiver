@@ -155,3 +155,80 @@ def test_query_short_options() -> None:
 
     data = json.loads(result.stdout)
     assert data[0]["num"] == 1
+
+
+# Benchmark command tests
+
+
+def test_benchmark_simple_query() -> None:
+    """Test benchmark command runs successfully."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1"])
+    assert result.exit_code == 0
+    # Should show timing results
+    assert "mean" in result.stdout.lower() or "ms" in result.stdout.lower()
+
+
+def test_benchmark_with_backend_option() -> None:
+    """Test benchmark command accepts --backends option."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--backends", "duckdb"])
+    assert result.exit_code == 0
+    assert "duckdb" in result.stdout.lower()
+
+
+def test_benchmark_multiple_backends() -> None:
+    """Test benchmark command with multiple backends."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--backends", "duckdb,sqlite"])
+    assert result.exit_code == 0
+    assert "duckdb" in result.stdout.lower()
+    assert "sqlite" in result.stdout.lower()
+
+
+def test_benchmark_iterations_option() -> None:
+    """Test benchmark command accepts --iterations option."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--iterations", "5"])
+    assert result.exit_code == 0
+
+
+def test_benchmark_warmup_option() -> None:
+    """Test benchmark command accepts --warmup option."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--warmup", "2"])
+    assert result.exit_code == 0
+
+
+def test_benchmark_shows_table_output() -> None:
+    """Test benchmark command shows Rich table by default."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1"])
+    assert result.exit_code == 0
+    # Should have table structure with headers
+    assert "Backend" in result.stdout or "backend" in result.stdout.lower()
+
+
+def test_benchmark_json_output() -> None:
+    """Test benchmark command with --output json."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--output", "json"])
+    assert result.exit_code == 0
+    import json
+
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+    assert len(data) > 0
+    assert "backend" in data[0]
+    assert "mean_ms" in data[0]
+
+
+def test_benchmark_short_options() -> None:
+    """Test benchmark command accepts short option forms."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "-b", "duckdb", "-i", "3", "-w", "1"])
+    assert result.exit_code == 0
+
+
+def test_benchmark_unknown_backend_shows_error() -> None:
+    """Test benchmark command shows error for unknown backend."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--backends", "nonexistent"])
+    assert result.exit_code != 0
+
+
+def test_benchmark_invalid_sql_shows_error() -> None:
+    """Test benchmark command shows error for invalid SQL."""
+    result = runner.invoke(app, ["benchmark", "SELEKT * FORM nowhere"])
+    assert result.exit_code != 0

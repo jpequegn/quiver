@@ -1,12 +1,23 @@
 """Quiver CLI - Universal ADBC query tool."""
 
+import json
+from enum import Enum
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from quiver import __version__
 from quiver.backends import get_registry
+from quiver.benchmark import BenchmarkRunner
 from quiver.output import OutputFormat, format_output
+
+
+class BenchmarkOutputFormat(str, Enum):
+    """Output formats for benchmark results."""
+
+    TABLE = "table"
+    JSON = "json"
 
 app = typer.Typer(
     name="quiver",
@@ -146,6 +157,109 @@ def query(
     if output_str is not None:
         # For json/csv, print the raw string (no Rich formatting)
         print(output_str)
+
+
+@app.command()
+def benchmark(
+    sql: str = typer.Argument(..., help="SQL query to benchmark."),
+    backends_str: str = typer.Option(
+        "duckdb",
+        "--backends",
+        "-b",
+        help="Comma-separated list of backends to benchmark.",
+    ),
+    iterations: int = typer.Option(
+        10,
+        "--iterations",
+        "-i",
+        help="Number of timed iterations per backend.",
+    ),
+    warmup: int = typer.Option(
+        3,
+        "--warmup",
+        "-w",
+        help="Number of warmup iterations (not included in results).",
+    ),
+    output: BenchmarkOutputFormat = typer.Option(
+        BenchmarkOutputFormat.TABLE,
+        "--output",
+        "-o",
+        help="Output format: table or json.",
+    ),
+) -> None:
+    """Benchmark a SQL query across one or more backends.
+
+    Examples:
+        quiver benchmark "SELECT 1"
+        quiver benchmark "SELECT * FROM trades" --backends duckdb,sqlite
+        quiver benchmark "SELECT 1" --iterations 100 --warmup 5
+        quiver benchmark "SELECT 1" -b duckdb,sqlite -o json
+    """
+    registry = get_registry()
+    backend_names = [b.strip() for b in backends_str.split(",")]
+
+    # Validate backends exist
+    for name in backend_names:
+        try:
+            registry.get(name)
+        except KeyError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+
+    # Run benchmarks
+    results = []
+    for name in backend_names:
+        backend_cls = registry.get(name)
+        try:
+            with backend_cls() as db:
+                runner = BenchmarkRunner(db)
+                result = runner.run(sql, iterations=iterations, warmup=warmup)
+                results.append(result)
+        except Exception as e:
+            console.print(f"[red]Error benchmarking {name}: {e}[/red]")
+            raise typer.Exit(1)
+
+    # Output results
+    if output == BenchmarkOutputFormat.JSON:
+        json_results = []
+        for r in results:
+            stats = r.stats()
+            json_results.append(
+                {
+                    "backend": r.backend,
+                    "query": r.query,
+                    "iterations": r.iterations,
+                    "warmup": r.warmup,
+                    "rows_returned": r.rows_returned,
+                    **stats,
+                }
+            )
+        print(json.dumps(json_results, indent=2))
+    else:
+        # Table output
+        table = Table(title="Benchmark Results")
+        table.add_column("Backend", style="cyan")
+        table.add_column("Mean (ms)", justify="right")
+        table.add_column("Median (ms)", justify="right")
+        table.add_column("P95 (ms)", justify="right")
+        table.add_column("Stddev", justify="right")
+        table.add_column("Rows", justify="right")
+
+        for r in results:
+            stats = r.stats()
+            table.add_row(
+                r.backend,
+                f"{stats.get('mean_ms', 0):.2f}",
+                f"{stats.get('median_ms', 0):.2f}",
+                f"{stats.get('p95_ms', 0):.2f}",
+                f"{stats.get('stddev_ms', 0):.2f}",
+                str(r.rows_returned),
+            )
+
+        console.print(table)
+        console.print()
+        console.print(f"[dim]Query: {sql}[/dim]")
+        console.print(f"[dim]Iterations: {iterations}, Warmup: {warmup}[/dim]")
 
 
 if __name__ == "__main__":
