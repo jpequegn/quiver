@@ -6,6 +6,7 @@ from rich.table import Table
 
 from quiver import __version__
 from quiver.backends import get_registry
+from quiver.output import OutputFormat, format_output
 
 app = typer.Typer(
     name="quiver",
@@ -97,6 +98,54 @@ def backends() -> None:
     console.print(table)
     console.print()
     console.print(f"[dim]Registered backends: {len(registered)}[/dim]")
+
+
+@app.command()
+def query(
+    sql: str = typer.Argument(..., help="SQL query to execute."),
+    backend: str = typer.Option(
+        "duckdb",
+        "--backend",
+        "-b",
+        help="Backend to use for query execution.",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.TABLE,
+        "--output",
+        "-o",
+        help="Output format: table, json, csv, or arrow.",
+    ),
+) -> None:
+    """Execute a SQL query against a backend and display results.
+
+    Examples:
+        quiver query "SELECT 1 as num"
+        quiver query "SELECT * FROM trades" --backend duckdb
+        quiver query "SELECT * FROM trades" --output json
+        quiver query "SELECT * FROM trades" -b duckdb -o csv
+    """
+    registry = get_registry()
+
+    # Get backend class
+    try:
+        backend_cls = registry.get(backend)
+    except KeyError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Execute query
+    try:
+        with backend_cls() as db:
+            result = db.execute(sql)
+    except Exception as e:
+        console.print(f"[red]Error executing query: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Format and display output
+    output_str = format_output(result, output, console)
+    if output_str is not None:
+        # For json/csv, print the raw string (no Rich formatting)
+        print(output_str)
 
 
 if __name__ == "__main__":
