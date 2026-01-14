@@ -385,3 +385,69 @@ def test_load_financial_unknown_backend_shows_error() -> None:
         app, ["load", "financial", "--backend", "nonexistent", "--synthetic"]
     )
     assert result.exit_code != 0
+
+
+# Load observability command tests
+
+
+def test_load_observability_help() -> None:
+    """Test load observability command shows help."""
+    result = runner.invoke(app, ["load", "observability", "--help"])
+    assert result.exit_code == 0
+    assert "observability" in result.stdout.lower() or "metrics" in result.stdout.lower()
+
+
+def test_load_observability_default() -> None:
+    """Test load observability with default options."""
+    result = runner.invoke(app, ["load", "observability", "--metrics", "100"])
+    assert result.exit_code == 0
+    assert "metrics" in result.stdout.lower()
+
+
+def test_load_observability_shows_table_info() -> None:
+    """Test load observability shows table and schema info."""
+    result = runner.invoke(app, ["load", "observability", "--metrics", "100"])
+    assert result.exit_code == 0
+    # Should show table name
+    assert "metrics" in result.stdout.lower()
+    # Should show schema columns
+    assert "timestamp" in result.stdout.lower()
+    assert "host" in result.stdout.lower()
+
+
+def test_load_observability_with_hosts_services() -> None:
+    """Test load observability with custom hosts and services."""
+    result = runner.invoke(
+        app, ["load", "observability", "--metrics", "200", "--hosts", "5", "--services", "3"]
+    )
+    assert result.exit_code == 0
+    assert "hosts=5" in result.stdout.lower() or "5" in result.stdout
+
+
+def test_load_observability_json_output() -> None:
+    """Test load observability with --output json."""
+    import json
+
+    result = runner.invoke(
+        app, ["load", "observability", "--metrics", "100", "--output", "json"]
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["table_name"] == "metrics"
+    assert data["rows_loaded"] > 0
+    assert "synthetic" in data["source"]
+    assert "schema" in data
+
+
+def test_load_observability_short_options() -> None:
+    """Test load observability accepts short option forms."""
+    result = runner.invoke(app, ["load", "observability", "-b", "duckdb", "-m", "100"])
+    assert result.exit_code == 0
+
+
+def test_load_observability_unknown_backend_shows_error() -> None:
+    """Test load observability shows error for unknown backend."""
+    result = runner.invoke(
+        app, ["load", "observability", "--backend", "nonexistent", "--metrics", "100"]
+    )
+    assert result.exit_code != 0
