@@ -232,3 +232,74 @@ def test_benchmark_invalid_sql_shows_error() -> None:
     """Test benchmark command shows error for invalid SQL."""
     result = runner.invoke(app, ["benchmark", "SELEKT * FORM nowhere"])
     assert result.exit_code != 0
+
+
+# Compare command tests
+
+
+def test_compare_simple_query() -> None:
+    """Test compare command runs successfully."""
+    result = runner.invoke(app, ["compare", "SELECT 1"])
+    assert result.exit_code == 0
+    # Should show ADBC and Native results
+    assert "adbc" in result.stdout.lower()
+    assert "native" in result.stdout.lower()
+
+
+def test_compare_with_backend_option() -> None:
+    """Test compare command accepts --backend option."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "--backend", "duckdb"])
+    assert result.exit_code == 0
+
+
+def test_compare_iterations_option() -> None:
+    """Test compare command accepts --iterations option."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "--iterations", "5"])
+    assert result.exit_code == 0
+
+
+def test_compare_warmup_option() -> None:
+    """Test compare command accepts --warmup option."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "--warmup", "2"])
+    assert result.exit_code == 0
+
+
+def test_compare_shows_percentage_diff() -> None:
+    """Test compare command shows percentage difference."""
+    result = runner.invoke(app, ["compare", "SELECT 1"])
+    assert result.exit_code == 0
+    # Should show percentage or baseline indicator
+    assert "%" in result.stdout or "baseline" in result.stdout.lower()
+
+
+def test_compare_json_output() -> None:
+    """Test compare command with --output json."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "--output", "json"])
+    assert result.exit_code == 0
+    import json
+
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+    assert len(data) == 2  # ADBC and Native
+    assert any("adbc" in r["method"].lower() for r in data)
+    assert any("native" in r["method"].lower() for r in data)
+
+
+def test_compare_short_options() -> None:
+    """Test compare command accepts short option forms."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "-b", "duckdb", "-i", "3", "-w", "1"])
+    assert result.exit_code == 0
+
+
+def test_compare_unknown_backend_shows_error() -> None:
+    """Test compare command shows error for unknown backend."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "--backend", "nonexistent"])
+    assert result.exit_code != 0
+
+
+def test_compare_unsupported_backend_shows_error() -> None:
+    """Test compare command shows error for backend without native support."""
+    # SQLite doesn't support native comparison
+    result = runner.invoke(app, ["compare", "SELECT 1", "--backend", "sqlite"])
+    assert result.exit_code != 0
+    assert "native" in result.stdout.lower() or "support" in result.stdout.lower()

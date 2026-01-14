@@ -1,7 +1,6 @@
 """Tests for SQLite backend implementation."""
 
 import pyarrow as pa
-import pytest
 
 from quiver.backends import get_registry
 from quiver.backends.sqlite import SQLiteBackend
