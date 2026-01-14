@@ -303,3 +303,85 @@ def test_compare_unsupported_backend_shows_error() -> None:
     result = runner.invoke(app, ["compare", "SELECT 1", "--backend", "sqlite"])
     assert result.exit_code != 0
     assert "native" in result.stdout.lower() or "support" in result.stdout.lower()
+
+
+# Load command tests
+
+
+def test_load_help() -> None:
+    """Test load command shows help."""
+    result = runner.invoke(app, ["load", "--help"])
+    assert result.exit_code == 0
+    assert "Load sample datasets" in result.stdout
+
+
+def test_load_financial_help() -> None:
+    """Test load financial command shows help."""
+    result = runner.invoke(app, ["load", "financial", "--help"])
+    assert result.exit_code == 0
+    assert "financial" in result.stdout.lower() or "trading" in result.stdout.lower()
+
+
+def test_load_financial_synthetic_default() -> None:
+    """Test load financial defaults to synthetic data."""
+    result = runner.invoke(app, ["load", "financial", "--rows", "100"])
+    assert result.exit_code == 0
+    assert "synthetic" in result.stdout.lower()
+    assert "100" in result.stdout
+
+
+def test_load_financial_synthetic_explicit() -> None:
+    """Test load financial with explicit --synthetic flag."""
+    result = runner.invoke(app, ["load", "financial", "--synthetic", "--rows", "500"])
+    assert result.exit_code == 0
+    assert "synthetic" in result.stdout.lower()
+    assert "500" in result.stdout
+
+
+def test_load_financial_shows_table_info() -> None:
+    """Test load financial shows table and schema info."""
+    result = runner.invoke(app, ["load", "financial", "--synthetic", "--rows", "100"])
+    assert result.exit_code == 0
+    # Should show table name
+    assert "trades" in result.stdout.lower()
+    # Should show schema columns
+    assert "timestamp" in result.stdout.lower()
+    assert "symbol" in result.stdout.lower()
+
+
+def test_load_financial_json_output() -> None:
+    """Test load financial with --output json."""
+    import json
+
+    result = runner.invoke(
+        app, ["load", "financial", "--synthetic", "--rows", "100", "--output", "json"]
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["table_name"] == "trades"
+    assert data["rows_loaded"] == 100
+    assert data["source"] == "synthetic"
+    assert "schema" in data
+
+
+def test_load_financial_mutual_exclusion() -> None:
+    """Test load financial rejects --symbol with --synthetic."""
+    result = runner.invoke(
+        app, ["load", "financial", "--synthetic", "--symbol", "AAPL"]
+    )
+    assert result.exit_code != 0
+    assert "cannot" in result.stdout.lower() or "error" in result.stdout.lower()
+
+
+def test_load_financial_short_options() -> None:
+    """Test load financial accepts short option forms."""
+    result = runner.invoke(app, ["load", "financial", "-b", "duckdb", "-r", "100"])
+    assert result.exit_code == 0
+
+
+def test_load_financial_unknown_backend_shows_error() -> None:
+    """Test load financial shows error for unknown backend."""
+    result = runner.invoke(
+        app, ["load", "financial", "--backend", "nonexistent", "--synthetic"]
+    )
+    assert result.exit_code != 0
