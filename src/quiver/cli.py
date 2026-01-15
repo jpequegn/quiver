@@ -10,7 +10,7 @@ from rich.table import Table
 from quiver import __version__
 from quiver.backends import get_registry
 from quiver.benchmark import BenchmarkRunner
-from quiver.loaders import FinancialLoader
+from quiver.loaders import FinancialLoader, ObservabilityLoader
 from quiver.output import OutputFormat, format_output
 
 
@@ -519,6 +519,106 @@ def load_financial(
     except ImportError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error loading data: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Output results
+    if output == BenchmarkOutputFormat.JSON:
+        result_dict = {
+            "table_name": result.table_name,
+            "rows_loaded": result.rows_loaded,
+            "source": result.source,
+            "schema": [
+                {"name": field.name, "type": str(field.type)}
+                for field in result.schema
+            ],
+        }
+        print(json.dumps(result_dict, indent=2))
+    else:
+        # Table output
+        table = Table(title="Load Results")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value")
+
+        table.add_row("Table", result.table_name)
+        table.add_row("Rows Loaded", f"{result.rows_loaded:,}")
+        table.add_row("Source", result.source)
+        table.add_row("Backend", backend)
+
+        console.print(table)
+        console.print()
+
+        # Show schema
+        schema_table = Table(title="Schema")
+        schema_table.add_column("Column", style="cyan")
+        schema_table.add_column("Type")
+
+        for field in result.schema:
+            schema_table.add_row(field.name, str(field.type))
+
+        console.print(schema_table)
+
+
+@load_app.command("observability")
+def load_observability(
+    backend: str = typer.Option(
+        "duckdb",
+        "--backend",
+        "-b",
+        help="Backend to load data into.",
+    ),
+    metrics: int = typer.Option(
+        100_000,
+        "--metrics",
+        "-m",
+        help="Number of metric rows to generate.",
+    ),
+    hosts: int = typer.Option(
+        10,
+        "--hosts",
+        help="Number of unique hosts to simulate.",
+    ),
+    services: int = typer.Option(
+        5,
+        "--services",
+        help="Number of unique services to simulate.",
+    ),
+    output: BenchmarkOutputFormat = typer.Option(
+        BenchmarkOutputFormat.TABLE,
+        "--output",
+        "-o",
+        help="Output format: table or json.",
+    ),
+) -> None:
+    """Load synthetic observability/metrics data into a backend.
+
+    Generates realistic monitoring metrics:
+    - cpu_usage: 0-100, smooth random walk
+    - memory_usage: 0-100, gradual changes
+    - request_latency_ms: 1-1000, log-normal distribution
+    - error_rate: 0-1, occasional spikes
+
+    Examples:
+        quiver load observability --metrics 100000
+        quiver load observability --metrics 1000000 --hosts 50 --services 20
+        quiver load observability --backend sqlite --metrics 10000
+    """
+    registry = get_registry()
+
+    # Get backend class
+    try:
+        backend_cls = registry.get(backend)
+    except KeyError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Load data
+    loader = ObservabilityLoader()
+
+    try:
+        with backend_cls() as db:
+            result = loader.load_synthetic(db, metrics, hosts, services)
     except Exception as e:
         console.print(f"[red]Error loading data: {e}[/red]")
         raise typer.Exit(1)
