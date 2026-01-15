@@ -512,3 +512,110 @@ def test_compare_flightsql_requires_host() -> None:
     result = runner.invoke(app, ["compare", "SELECT 1", "--backend", "flightsql"])
     assert result.exit_code != 0
     assert "host" in result.stdout.lower() or "--host" in result.stdout
+
+
+# Config command tests
+
+
+def test_init_help() -> None:
+    """Test init command shows help."""
+    result = runner.invoke(app, ["init", "--help"])
+    assert result.exit_code == 0
+    assert "config" in result.stdout.lower()
+
+
+def test_init_creates_config(tmp_path, monkeypatch) -> None:
+    """Test init command creates config file."""
+    import quiver.cli
+    import quiver.config
+
+    config_path = tmp_path / "config.toml"
+
+    # Override config path
+    monkeypatch.setattr(quiver.config, "get_config_path", lambda: config_path)
+
+    # Reset config cache
+    quiver.cli._config = None
+    quiver.cli._config_loaded = False
+
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0
+    assert "Created configuration file" in result.stdout
+    assert config_path.exists()
+
+
+def test_init_rejects_existing(tmp_path, monkeypatch) -> None:
+    """Test init command rejects overwriting existing config."""
+    import quiver.cli
+    import quiver.config
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("existing content")
+
+    monkeypatch.setattr(quiver.config, "get_config_path", lambda: config_path)
+    quiver.cli._config = None
+    quiver.cli._config_loaded = False
+
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code != 0
+    assert "already exists" in result.stdout.lower() or "use --force" in result.stdout.lower()
+
+
+def test_init_force_overwrites(tmp_path, monkeypatch) -> None:
+    """Test init command with --force overwrites existing config."""
+    import quiver.cli
+    import quiver.config
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("old content")
+
+    monkeypatch.setattr(quiver.config, "get_config_path", lambda: config_path)
+    quiver.cli._config = None
+    quiver.cli._config_loaded = False
+
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0
+    content = config_path.read_text()
+    assert "[defaults]" in content
+
+
+def test_config_no_file(tmp_path, monkeypatch) -> None:
+    """Test config command when no config file exists."""
+    import quiver.cli
+    import quiver.config
+
+    config_path = tmp_path / "nonexistent" / "config.toml"
+
+    monkeypatch.setattr(quiver.config, "get_config_path", lambda: config_path)
+    quiver.cli._config = None
+    quiver.cli._config_loaded = False
+
+    result = runner.invoke(app, ["config"])
+    assert result.exit_code == 0
+    assert "no configuration file" in result.stdout.lower()
+
+
+def test_config_shows_loaded(tmp_path, monkeypatch) -> None:
+    """Test config command shows loaded configuration."""
+    import quiver.cli
+    import quiver.config
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("""
+[defaults]
+backend = "sqlite"
+output = "json"
+
+[backends.duckdb]
+type = "duckdb"
+""")
+
+    monkeypatch.setattr(quiver.config, "get_config_path", lambda: config_path)
+    quiver.cli._config = None
+    quiver.cli._config_loaded = False
+
+    result = runner.invoke(app, ["config"])
+    assert result.exit_code == 0
+    assert "sqlite" in result.stdout
+    assert "json" in result.stdout
+    assert "duckdb" in result.stdout

@@ -1,6 +1,7 @@
 """Quiver CLI - Universal ADBC query tool."""
 
 import json
+import os
 from enum import Enum
 
 import typer
@@ -10,8 +11,83 @@ from rich.table import Table
 from quiver import __version__
 from quiver.backends import get_registry
 from quiver.benchmark import BenchmarkRunner
+from quiver.config import (
+    QuiverConfig,
+    create_default_config,
+    get_config_path,
+    load_config,
+)
 from quiver.loaders import FinancialLoader, ObservabilityLoader
 from quiver.output import OutputFormat, format_output
+
+
+# Global config cache
+_config: QuiverConfig | None = None
+_config_loaded: bool = False
+
+
+def get_config() -> QuiverConfig | None:
+    """Get the loaded configuration, loading if necessary.
+
+    Returns:
+        QuiverConfig if available, None otherwise.
+    """
+    global _config, _config_loaded
+    if not _config_loaded:
+        try:
+            _config = load_config()
+        except ValueError:
+            _config = None
+        _config_loaded = True
+    return _config
+
+
+def get_default_backend() -> str:
+    """Get default backend from config or environment.
+
+    Priority: QUIVER_BACKEND env var > config > "duckdb"
+    """
+    env_backend = os.environ.get("QUIVER_BACKEND")
+    if env_backend:
+        return env_backend
+
+    config = get_config()
+    if config:
+        return config.default_backend
+
+    return "duckdb"
+
+
+def get_default_output() -> str:
+    """Get default output format from config or environment.
+
+    Priority: QUIVER_OUTPUT env var > config > "table"
+    """
+    env_output = os.environ.get("QUIVER_OUTPUT")
+    if env_output:
+        return env_output
+
+    config = get_config()
+    if config:
+        return config.default_output
+
+    return "table"
+
+
+def get_backend_config(backend_name: str) -> tuple[str | None, str | None]:
+    """Get host and token for a backend from config.
+
+    Args:
+        backend_name: Name of the backend.
+
+    Returns:
+        Tuple of (host, token) from config, or (None, None) if not configured.
+    """
+    config = get_config()
+    if config and backend_name in config.backends:
+        bc = config.backends[backend_name]
+        return bc.host, bc.token
+    return None, None
 
 
 class BenchmarkOutputFormat(str, Enum):
@@ -156,13 +232,87 @@ def backends() -> None:
 
 
 @app.command()
+def init(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite existing configuration file.",
+    ),
+) -> None:
+    """Initialize Quiver configuration file.
+
+    Creates a default configuration file at ~/.config/quiver/config.toml
+    with sensible defaults and commented examples for various backends.
+
+    Examples:
+        quiver init           # Create default config
+        quiver init --force   # Overwrite existing config
+    """
+    try:
+        config_path = create_default_config(force=force)
+        console.print(f"[green]Created configuration file:[/green] {config_path}")
+        console.print()
+        console.print("[dim]Edit the file to configure backends and defaults.[/dim]")
+    except FileExistsError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("[dim]Use --force to overwrite.[/dim]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error creating config: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def config() -> None:
+    """Show current configuration.
+
+    Displays the loaded configuration and its source.
+    """
+    config_path = get_config_path()
+    cfg = get_config()
+
+    if cfg is None:
+        console.print(f"[yellow]No configuration file found at:[/yellow] {config_path}")
+        console.print("[dim]Run 'quiver init' to create one.[/dim]")
+        return
+
+    console.print(f"[green]Configuration loaded from:[/green] {config_path}")
+    console.print()
+
+    # Show defaults
+    table = Table(title="Defaults")
+    table.add_column("Setting", style="cyan")
+    table.add_column("Value")
+    table.add_row("backend", cfg.default_backend)
+    table.add_row("output", cfg.default_output)
+    console.print(table)
+    console.print()
+
+    # Show configured backends
+    if cfg.backends:
+        backends_table = Table(title="Configured Backends")
+        backends_table.add_column("Name", style="cyan")
+        backends_table.add_column("Type")
+        backends_table.add_column("Host")
+
+        for name, bc in cfg.backends.items():
+            host_display = bc.host or "[dim]local[/dim]"
+            backends_table.add_row(name, bc.type, host_display)
+
+        console.print(backends_table)
+    else:
+        console.print("[dim]No backends configured.[/dim]")
+
+
+@app.command()
 def query(
     sql: str = typer.Argument(..., help="SQL query to execute."),
-    backend: str = typer.Option(
-        "duckdb",
+    backend: str | None = typer.Option(
+        None,
         "--backend",
         "-b",
-        help="Backend to use for query execution.",
+        help="Backend to use for query execution (default: from config or 'duckdb').",
     ),
     host: str | None = typer.Option(
         None,
@@ -176,11 +326,11 @@ def query(
         "-t",
         help="Authentication token for remote backends.",
     ),
-    output: OutputFormat = typer.Option(
-        OutputFormat.TABLE,
+    output: OutputFormat | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Output format: table, json, csv, or arrow.",
+        help="Output format: table, json, csv, or arrow (default: from config or 'table').",
     ),
 ) -> None:
     """Execute a SQL query against a backend and display results.
@@ -192,6 +342,22 @@ def query(
         quiver query "SELECT * FROM trades" -b duckdb -o csv
         quiver query "SELECT 1" --backend flightsql --host grpc://localhost:8815
     """
+    # Apply defaults from config
+    if backend is None:
+        backend = get_default_backend()
+
+    if output is None:
+        output_str = get_default_output()
+        output = OutputFormat(output_str) if output_str in OutputFormat.__members__.values() else OutputFormat.TABLE
+
+    # Get host/token from config if not provided
+    if host is None or token is None:
+        config_host, config_token = get_backend_config(backend)
+        if host is None:
+            host = config_host
+        if token is None:
+            token = config_token
+
     # Create backend instance
     try:
         db = _create_backend(backend, host, token)
@@ -217,11 +383,11 @@ def query(
 @app.command()
 def benchmark(
     sql: str = typer.Argument(..., help="SQL query to benchmark."),
-    backends_str: str = typer.Option(
-        "duckdb",
+    backends_str: str | None = typer.Option(
+        None,
         "--backends",
         "-b",
-        help="Comma-separated list of backends to benchmark.",
+        help="Comma-separated list of backends to benchmark (default: from config or 'duckdb').",
     ),
     host: str | None = typer.Option(
         None,
@@ -263,13 +429,24 @@ def benchmark(
         quiver benchmark "SELECT 1" -b duckdb,sqlite -o json
         quiver benchmark "SELECT 1" -b flightsql --host grpc://localhost:8815
     """
+    # Apply defaults from config
+    if backends_str is None:
+        backends_str = get_default_backend()
     backend_names = [b.strip() for b in backends_str.split(",")]
 
     # Run benchmarks
     results = []
     for name in backend_names:
+        # Get host/token from config if not provided on command line
+        backend_host, backend_token = host, token
+        if backend_host is None or backend_token is None:
+            config_host, config_token = get_backend_config(name)
+            if backend_host is None:
+                backend_host = config_host
+            if backend_token is None:
+                backend_token = config_token
         try:
-            db = _create_backend(name, host, token)
+            db = _create_backend(name, backend_host, backend_token)
             with db:
                 runner = BenchmarkRunner(db)
                 result = runner.run(sql, iterations=iterations, warmup=warmup)
@@ -327,11 +504,11 @@ def benchmark(
 @app.command()
 def compare(
     sql: str = typer.Argument(..., help="SQL query to benchmark."),
-    backend: str = typer.Option(
-        "duckdb",
+    backend: str | None = typer.Option(
+        None,
         "--backend",
         "-b",
-        help="Backend to compare ADBC vs native performance.",
+        help="Backend to compare ADBC vs native performance (default: from config or 'duckdb').",
     ),
     host: str | None = typer.Option(
         None,
@@ -375,6 +552,18 @@ def compare(
         quiver compare "SELECT 1" --iterations 50 --warmup 5
         quiver compare "SELECT 1" -o json
     """
+    # Apply defaults from config
+    if backend is None:
+        backend = get_default_backend()
+
+    # Get host/token from config if not provided
+    if host is None or token is None:
+        config_host, config_token = get_backend_config(backend)
+        if host is None:
+            host = config_host
+        if token is None:
+            token = config_token
+
     # Create backend instance
     try:
         db = _create_backend(backend, host, token)
@@ -489,11 +678,11 @@ def compare(
 
 @load_app.command("financial")
 def load_financial(
-    backend: str = typer.Option(
-        "duckdb",
+    backend: str | None = typer.Option(
+        None,
         "--backend",
         "-b",
-        help="Backend to load data into.",
+        help="Backend to load data into (default: from config or 'duckdb').",
     ),
     host: str | None = typer.Option(
         None,
@@ -567,6 +756,18 @@ def load_financial(
     if not real_data_requested and not synthetic:
         synthetic = True
 
+    # Apply defaults from config
+    if backend is None:
+        backend = get_default_backend()
+
+    # Get host/token from config if not provided
+    if host is None or token is None:
+        config_host, config_token = get_backend_config(backend)
+        if host is None:
+            host = config_host
+        if token is None:
+            token = config_token
+
     # Create backend instance
     try:
         db = _create_backend(backend, host, token)
@@ -636,11 +837,11 @@ def load_financial(
 
 @load_app.command("observability")
 def load_observability(
-    backend: str = typer.Option(
-        "duckdb",
+    backend: str | None = typer.Option(
+        None,
         "--backend",
         "-b",
-        help="Backend to load data into.",
+        help="Backend to load data into (default: from config or 'duckdb').",
     ),
     host: str | None = typer.Option(
         None,
@@ -690,6 +891,18 @@ def load_observability(
         quiver load observability --metrics 1000000 --hosts 50 --services 20
         quiver load observability --backend sqlite --metrics 10000
     """
+    # Apply defaults from config
+    if backend is None:
+        backend = get_default_backend()
+
+    # Get host/token from config if not provided
+    if host is None or token is None:
+        config_host, config_token = get_backend_config(backend)
+        if host is None:
+            host = config_host
+        if token is None:
+            token = config_token
+
     # Create backend instance
     try:
         db = _create_backend(backend, host, token)
