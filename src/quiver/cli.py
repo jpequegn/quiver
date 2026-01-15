@@ -744,5 +744,54 @@ def load_observability(
         console.print(schema_table)
 
 
+@app.command()
+def serve(
+    data: str = typer.Argument(..., help="Path to Parquet file, DuckDB database, or directory."),
+    port: int = typer.Option(
+        8815,
+        "--port",
+        "-p",
+        help="Port to listen on.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-V",
+        help="Log FlightSQL protocol details.",
+    ),
+) -> None:
+    """Start a FlightSQL server for learning and testing.
+
+    This server allows you to query data via the FlightSQL protocol,
+    useful for understanding how Arrow Flight SQL works.
+
+    Examples:
+        quiver serve trades.parquet
+        quiver serve analytics.duckdb --port 9000
+        quiver serve ./data/ --verbose
+    """
+    from pathlib import Path
+
+    from quiver_server import QuiverFlightServer
+
+    data_path = Path(data)
+    if not data_path.exists():
+        console.print(f"[red]Error: Path does not exist: {data}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        server = QuiverFlightServer(
+            data_path=data_path,
+            port=port,
+            verbose=verbose,
+        )
+        server.serve()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Server stopped.[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error starting server: {e}[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
