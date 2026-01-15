@@ -58,6 +58,41 @@ def main(
     pass
 
 
+def _create_backend(
+    backend_name: str,
+    host: str | None = None,
+    token: str | None = None,
+):
+    """Create a backend instance with appropriate configuration.
+
+    Args:
+        backend_name: Name of the backend to create.
+        host: Host URI for remote backends (FlightSQL, InfluxDB).
+        token: Authentication token for remote backends.
+
+    Returns:
+        Configured backend instance.
+
+    Raises:
+        KeyError: If backend is not registered.
+        ValueError: If required options are missing for a backend.
+    """
+    registry = get_registry()
+    backend_cls = registry.get(backend_name)
+
+    # FlightSQL and similar remote backends need host configuration
+    if backend_name in ("flightsql", "influxdb"):
+        if host is None:
+            raise ValueError(
+                f"--host is required for {backend_name} backend. "
+                f"Example: --host grpc://localhost:8815"
+            )
+        return backend_cls(uri=host, token=token)
+
+    # Local backends (duckdb, sqlite) don't need extra config
+    return backend_cls()
+
+
 def _check_backend_status(name: str) -> tuple[bool, str]:
     """Check if a backend is available and working.
 
@@ -129,6 +164,18 @@ def query(
         "-b",
         help="Backend to use for query execution.",
     ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        "-H",
+        help="Host URI for remote backends (e.g., grpc://localhost:8815).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Authentication token for remote backends.",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.TABLE,
         "--output",
@@ -143,19 +190,18 @@ def query(
         quiver query "SELECT * FROM trades" --backend duckdb
         quiver query "SELECT * FROM trades" --output json
         quiver query "SELECT * FROM trades" -b duckdb -o csv
+        quiver query "SELECT 1" --backend flightsql --host grpc://localhost:8815
     """
-    registry = get_registry()
-
-    # Get backend class
+    # Create backend instance
     try:
-        backend_cls = registry.get(backend)
-    except KeyError as e:
+        db = _create_backend(backend, host, token)
+    except (KeyError, ValueError) as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
     # Execute query
     try:
-        with backend_cls() as db:
+        with db:
             result = db.execute(sql)
     except Exception as e:
         console.print(f"[red]Error executing query: {e}[/red]")
@@ -176,6 +222,18 @@ def benchmark(
         "--backends",
         "-b",
         help="Comma-separated list of backends to benchmark.",
+    ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        "-H",
+        help="Host URI for remote backends (e.g., grpc://localhost:8815).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Authentication token for remote backends.",
     ),
     iterations: int = typer.Option(
         10,
@@ -203,27 +261,22 @@ def benchmark(
         quiver benchmark "SELECT * FROM trades" --backends duckdb,sqlite
         quiver benchmark "SELECT 1" --iterations 100 --warmup 5
         quiver benchmark "SELECT 1" -b duckdb,sqlite -o json
+        quiver benchmark "SELECT 1" -b flightsql --host grpc://localhost:8815
     """
-    registry = get_registry()
     backend_names = [b.strip() for b in backends_str.split(",")]
-
-    # Validate backends exist
-    for name in backend_names:
-        try:
-            registry.get(name)
-        except KeyError as e:
-            console.print(f"[red]Error: {e}[/red]")
-            raise typer.Exit(1)
 
     # Run benchmarks
     results = []
     for name in backend_names:
-        backend_cls = registry.get(name)
         try:
-            with backend_cls() as db:
+            db = _create_backend(name, host, token)
+            with db:
                 runner = BenchmarkRunner(db)
                 result = runner.run(sql, iterations=iterations, warmup=warmup)
                 results.append(result)
+        except (KeyError, ValueError) as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
         except Exception as e:
             console.print(f"[red]Error benchmarking {name}: {e}[/red]")
             raise typer.Exit(1)
@@ -280,6 +333,18 @@ def compare(
         "-b",
         help="Backend to compare ADBC vs native performance.",
     ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        "-H",
+        help="Host URI for remote backends (e.g., grpc://localhost:8815).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Authentication token for remote backends.",
+    ),
     iterations: int = typer.Option(
         10,
         "--iterations",
@@ -310,17 +375,15 @@ def compare(
         quiver compare "SELECT 1" --iterations 50 --warmup 5
         quiver compare "SELECT 1" -o json
     """
-    registry = get_registry()
-
-    # Get backend class
+    # Create backend instance
     try:
-        backend_cls = registry.get(backend)
-    except KeyError as e:
+        db = _create_backend(backend, host, token)
+    except (KeyError, ValueError) as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
     # Check if backend supports native comparison
-    with backend_cls() as db:
+    with db:
         if not db.supports_native_comparison():
             console.print(
                 f"[red]Error: Backend '{backend}' does not support native comparison.[/red]"
@@ -332,7 +395,8 @@ def compare(
 
     # Run benchmarks
     try:
-        with backend_cls() as db:
+        db = _create_backend(backend, host, token)
+        with db:
             runner = BenchmarkRunner(db)
             adbc_result = runner.run(sql, iterations=iterations, warmup=warmup)
             native_result = runner.run_native(sql, iterations=iterations, warmup=warmup)
@@ -431,6 +495,18 @@ def load_financial(
         "-b",
         help="Backend to load data into.",
     ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        "-H",
+        help="Host URI for remote backends (e.g., grpc://localhost:8815).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Authentication token for remote backends.",
+    ),
     symbol: str | None = typer.Option(
         None,
         "--symbol",
@@ -478,8 +554,6 @@ def load_financial(
         quiver load financial --symbols AAPL,GOOGL,MSFT --days 365
         quiver load financial --synthetic --rows 10000000
     """
-    registry = get_registry()
-
     # Validate mutual exclusion
     real_data_requested = symbol is not None or symbols is not None
     if real_data_requested and synthetic:
@@ -493,10 +567,10 @@ def load_financial(
     if not real_data_requested and not synthetic:
         synthetic = True
 
-    # Get backend class
+    # Create backend instance
     try:
-        backend_cls = registry.get(backend)
-    except KeyError as e:
+        db = _create_backend(backend, host, token)
+    except (KeyError, ValueError) as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
@@ -504,7 +578,7 @@ def load_financial(
     loader = FinancialLoader()
 
     try:
-        with backend_cls() as db:
+        with db:
             if synthetic:
                 result = loader.load_synthetic(db, rows)
             else:
@@ -568,6 +642,18 @@ def load_observability(
         "-b",
         help="Backend to load data into.",
     ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        "-H",
+        help="Host URI for remote backends (e.g., grpc://localhost:8815).",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Authentication token for remote backends.",
+    ),
     metrics: int = typer.Option(
         100_000,
         "--metrics",
@@ -604,12 +690,10 @@ def load_observability(
         quiver load observability --metrics 1000000 --hosts 50 --services 20
         quiver load observability --backend sqlite --metrics 10000
     """
-    registry = get_registry()
-
-    # Get backend class
+    # Create backend instance
     try:
-        backend_cls = registry.get(backend)
-    except KeyError as e:
+        db = _create_backend(backend, host, token)
+    except (KeyError, ValueError) as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
@@ -617,7 +701,7 @@ def load_observability(
     loader = ObservabilityLoader()
 
     try:
-        with backend_cls() as db:
+        with db:
             result = loader.load_synthetic(db, metrics, hosts, services)
     except Exception as e:
         console.print(f"[red]Error loading data: {e}[/red]")

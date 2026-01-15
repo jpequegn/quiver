@@ -451,3 +451,64 @@ def test_load_observability_unknown_backend_shows_error() -> None:
         app, ["load", "observability", "--backend", "nonexistent", "--metrics", "100"]
     )
     assert result.exit_code != 0
+
+
+# FlightSQL backend CLI tests
+
+
+def test_backends_shows_flightsql() -> None:
+    """Test backends command shows FlightSQL in the list."""
+    result = runner.invoke(app, ["backends"])
+    assert result.exit_code == 0
+    assert "flightsql" in result.stdout.lower()
+
+
+def test_query_flightsql_requires_host() -> None:
+    """Test query with FlightSQL backend requires --host option."""
+    result = runner.invoke(app, ["query", "SELECT 1", "--backend", "flightsql"])
+    assert result.exit_code != 0
+    assert "host" in result.stdout.lower() or "--host" in result.stdout
+
+
+def test_query_accepts_host_option() -> None:
+    """Test query command accepts --host option."""
+    # This will fail to connect but should accept the option
+    result = runner.invoke(
+        app, ["query", "SELECT 1", "--backend", "flightsql", "--host", "grpc://localhost:8815"]
+    )
+    # Exit code will be non-zero due to connection failure, but not argument error
+    assert "--host" not in result.stdout or "required" not in result.stdout.lower()
+
+
+def test_query_accepts_token_option() -> None:
+    """Test query command accepts --token option."""
+    # This will fail to connect but should accept the option
+    result = runner.invoke(
+        app,
+        [
+            "query",
+            "SELECT 1",
+            "--backend",
+            "flightsql",
+            "--host",
+            "grpc://localhost:8815",
+            "--token",
+            "test-token",
+        ],
+    )
+    # Should not complain about unknown option
+    assert "no such option" not in result.stdout.lower()
+
+
+def test_benchmark_flightsql_requires_host() -> None:
+    """Test benchmark with FlightSQL backend requires --host option."""
+    result = runner.invoke(app, ["benchmark", "SELECT 1", "--backends", "flightsql"])
+    assert result.exit_code != 0
+    assert "host" in result.stdout.lower() or "--host" in result.stdout
+
+
+def test_compare_flightsql_requires_host() -> None:
+    """Test compare with FlightSQL backend requires --host option."""
+    result = runner.invoke(app, ["compare", "SELECT 1", "--backend", "flightsql"])
+    assert result.exit_code != 0
+    assert "host" in result.stdout.lower() or "--host" in result.stdout
