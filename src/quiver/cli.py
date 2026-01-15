@@ -10,6 +10,7 @@ from rich.table import Table
 from quiver import __version__
 from quiver.backends import get_registry
 from quiver.benchmark import BenchmarkRunner
+from quiver.loaders import FinancialLoader
 from quiver.output import OutputFormat, format_output
 
 
@@ -25,6 +26,14 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+# Subcommand group for data loading
+load_app = typer.Typer(
+    name="load",
+    help="Load sample datasets into backends for testing and benchmarking.",
+    no_args_is_help=True,
+)
+app.add_typer(load_app)
 
 
 def version_callback(value: bool) -> None:
@@ -412,6 +421,143 @@ def compare(
 
         console.print(f"[dim]Query: {sql}[/dim]")
         console.print(f"[dim]Iterations: {iterations}, Warmup: {warmup}[/dim]")
+
+
+@load_app.command("financial")
+def load_financial(
+    backend: str = typer.Option(
+        "duckdb",
+        "--backend",
+        "-b",
+        help="Backend to load data into.",
+    ),
+    symbol: str | None = typer.Option(
+        None,
+        "--symbol",
+        "-s",
+        help="Single ticker symbol to load (e.g., AAPL).",
+    ),
+    symbols: str | None = typer.Option(
+        None,
+        "--symbols",
+        help="Comma-separated list of ticker symbols (e.g., AAPL,GOOGL,MSFT).",
+    ),
+    days: int = typer.Option(
+        365,
+        "--days",
+        "-d",
+        help="Number of days of historical data to fetch.",
+    ),
+    synthetic: bool = typer.Option(
+        False,
+        "--synthetic",
+        help="Generate synthetic data instead of fetching real data.",
+    ),
+    rows: int = typer.Option(
+        100_000,
+        "--rows",
+        "-r",
+        help="Number of rows to generate (only with --synthetic).",
+    ),
+    output: BenchmarkOutputFormat = typer.Option(
+        BenchmarkOutputFormat.TABLE,
+        "--output",
+        "-o",
+        help="Output format: table or json.",
+    ),
+) -> None:
+    """Load financial/trading data into a backend.
+
+    Supports two data sources:
+    - Real: Historical data from Yahoo Finance (requires yfinance)
+    - Synthetic: Generated data using Geometric Brownian Motion
+
+    Examples:
+        quiver load financial --synthetic --rows 100000
+        quiver load financial --backend duckdb --symbol AAPL --days 365
+        quiver load financial --symbols AAPL,GOOGL,MSFT --days 365
+        quiver load financial --synthetic --rows 10000000
+    """
+    registry = get_registry()
+
+    # Validate mutual exclusion
+    real_data_requested = symbol is not None or symbols is not None
+    if real_data_requested and synthetic:
+        console.print(
+            "[red]Error: Cannot use --symbol/--symbols with --synthetic. "
+            "Choose one data source.[/red]"
+        )
+        raise typer.Exit(1)
+
+    # Default to synthetic if nothing specified
+    if not real_data_requested and not synthetic:
+        synthetic = True
+
+    # Get backend class
+    try:
+        backend_cls = registry.get(backend)
+    except KeyError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Load data
+    loader = FinancialLoader()
+
+    try:
+        with backend_cls() as db:
+            if synthetic:
+                result = loader.load_synthetic(db, rows)
+            else:
+                # Parse symbols
+                symbol_list = []
+                if symbol:
+                    symbol_list.append(symbol.upper())
+                if symbols:
+                    symbol_list.extend(s.strip().upper() for s in symbols.split(","))
+
+                result = loader.load_real(db, symbol_list, days)
+    except ImportError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error loading data: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Output results
+    if output == BenchmarkOutputFormat.JSON:
+        result_dict = {
+            "table_name": result.table_name,
+            "rows_loaded": result.rows_loaded,
+            "source": result.source,
+            "schema": [
+                {"name": field.name, "type": str(field.type)}
+                for field in result.schema
+            ],
+        }
+        print(json.dumps(result_dict, indent=2))
+    else:
+        # Table output
+        table = Table(title="Load Results")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value")
+
+        table.add_row("Table", result.table_name)
+        table.add_row("Rows Loaded", f"{result.rows_loaded:,}")
+        table.add_row("Source", result.source)
+        table.add_row("Backend", backend)
+
+        console.print(table)
+        console.print()
+
+        # Show schema
+        schema_table = Table(title="Schema")
+        schema_table.add_column("Column", style="cyan")
+        schema_table.add_column("Type")
+
+        for field in result.schema:
+            schema_table.add_row(field.name, str(field.type))
+
+        console.print(schema_table)
 
 
 if __name__ == "__main__":
