@@ -1,0 +1,36 @@
+# Docker Compose for Quiver development and testing
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose logs influxdb  # View InfluxDB logs
+#
+# InfluxDB FlightSQL:
+#   Note: FlightSQL support in InfluxDB is experimental.
+#   The gRPC endpoint is available on the same port as HTTP (8086).
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: quiver-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpass
+      - DOCKER_INFLUXDB_INIT_ORG=quiver
+      - DOCKER_INFLUXDB_INIT_BUCKET=metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=quiver-test-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  influxdb-data:
+  influxdb-config:
