@@ -619,3 +619,56 @@ type = "duckdb"
     assert "sqlite" in result.stdout
     assert "json" in result.stdout
     assert "duckdb" in result.stdout
+
+
+# Doctor command tests
+
+
+def test_doctor_help() -> None:
+    """Test doctor command shows help."""
+    result = runner.invoke(app, ["doctor", "--help"])
+    assert result.exit_code == 0
+    assert "diagnostic" in result.stdout.lower()
+
+
+def test_doctor_runs_successfully() -> None:
+    """Test doctor command runs and completes."""
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "Quiver Diagnostics" in result.stdout
+
+
+def test_doctor_shows_backends() -> None:
+    """Test doctor command shows backend status."""
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    # Should show all known backends
+    assert "duckdb" in result.stdout.lower()
+    assert "sqlite" in result.stdout.lower()
+    assert "flightsql" in result.stdout.lower()
+    assert "influxdb" in result.stdout.lower()
+
+
+def test_doctor_shows_dependencies() -> None:
+    """Test doctor command shows dependency versions."""
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    # Should show core dependencies
+    assert "pyarrow" in result.stdout.lower()
+    assert "adbc-driver-manager" in result.stdout.lower()
+
+
+def test_doctor_shows_status_indicators() -> None:
+    """Test doctor command shows status indicators."""
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    # Should have status indicators
+    assert "[OK]" in result.stdout or "OK" in result.stdout
+
+
+def test_doctor_shows_summary() -> None:
+    """Test doctor command shows summary."""
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    # Should show summary (checks passed or failed)
+    assert "checks" in result.stdout.lower()

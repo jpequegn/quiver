@@ -231,6 +231,152 @@ def backends() -> None:
     console.print(f"[dim]Registered backends: {len(registered)}[/dim]")
 
 
+# Backend classification for doctor command
+LOCAL_BACKENDS = {"duckdb", "sqlite"}
+REMOTE_BACKENDS = {"flightsql", "influxdb"}
+
+
+def _get_package_version(package_name: str) -> str | None:
+    """Get version of an installed package.
+
+    Args:
+        package_name: Name of the package (e.g., "pyarrow").
+
+    Returns:
+        Version string or None if not installed.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version(package_name)
+    except Exception:
+        return None
+
+
+def _check_backend_for_doctor(name: str) -> tuple[str, str, str]:
+    """Check backend status for doctor command.
+
+    Args:
+        name: Backend name to check.
+
+    Returns:
+        Tuple of (status, style, message).
+        Status: OK, SKIP, FAIL
+        Style: Rich style string
+        Message: Description of status
+    """
+    registry = get_registry()
+
+    # Check if backend is registered
+    if name not in registry.list_backends():
+        return "SKIP", "dim", "Driver not installed"
+
+    # For remote backends, just check if driver is importable
+    if name in REMOTE_BACKENDS:
+        try:
+            registry.get(name)  # This triggers the import
+            return "OK", "green", "Driver available (remote backend)"
+        except ImportError as e:
+            return "FAIL", "red", f"Import error: {e}"
+
+    # For local backends, try to connect
+    try:
+        backend_cls = registry.get(name)
+        backend = backend_cls()
+        backend.connect()
+        backend.close()
+        return "OK", "green", "Connected successfully"
+    except ImportError as e:
+        return "FAIL", "red", f"Missing dependency: {e}"
+    except Exception as e:
+        return "FAIL", "red", f"Connection error: {e}"
+
+
+@app.command()
+def doctor() -> None:
+    """Run diagnostic checks on backends and dependencies.
+
+    Verifies that backends are working and shows installed versions
+    of key dependencies. Useful for troubleshooting issues.
+
+    Examples:
+        quiver doctor
+    """
+    console.print()
+    console.print("[bold]Quiver Diagnostics[/bold]")
+    console.print("=" * 40)
+    console.print()
+
+    # Track if any critical failures occurred
+    has_failures = False
+
+    # Check backends
+    backends_table = Table(title="Backends", show_header=True)
+    backends_table.add_column("Backend", style="cyan", no_wrap=True)
+    backends_table.add_column("Status", justify="center")
+    backends_table.add_column("Details")
+
+    for name in KNOWN_BACKENDS:
+        status, style, message = _check_backend_for_doctor(name)
+
+        if status == "OK":
+            status_display = f"[green][OK][/green]"
+        elif status == "SKIP":
+            status_display = f"[dim][SKIP][/dim]"
+        else:
+            status_display = f"[red][FAIL][/red]"
+            if name in LOCAL_BACKENDS:
+                has_failures = True
+
+        backends_table.add_row(name, status_display, f"[{style}]{message}[/{style}]")
+
+    console.print(backends_table)
+    console.print()
+
+    # Check dependencies
+    deps_table = Table(title="Dependencies", show_header=True)
+    deps_table.add_column("Package", style="cyan", no_wrap=True)
+    deps_table.add_column("Version", justify="right")
+
+    # Core dependencies
+    core_deps = [
+        "pyarrow",
+        "adbc-driver-manager",
+    ]
+
+    # Optional driver dependencies
+    optional_deps = [
+        "adbc-driver-duckdb",
+        "adbc-driver-sqlite",
+        "adbc-driver-flightsql",
+    ]
+
+    for pkg in core_deps:
+        version = _get_package_version(pkg)
+        if version:
+            deps_table.add_row(pkg, f"[green]{version}[/green]")
+        else:
+            deps_table.add_row(pkg, "[red]not installed[/red]")
+            has_failures = True
+
+    for pkg in optional_deps:
+        version = _get_package_version(pkg)
+        if version:
+            deps_table.add_row(pkg, f"[green]{version}[/green]")
+        else:
+            deps_table.add_row(pkg, "[dim]not installed[/dim]")
+
+    console.print(deps_table)
+    console.print()
+
+    # Summary
+    if has_failures:
+        console.print("[red]✗ Some checks failed[/red]")
+        raise typer.Exit(1)
+    else:
+        console.print("[green]✓ All checks passed[/green]")
+
+
 @app.command()
 def init(
     force: bool = typer.Option(
