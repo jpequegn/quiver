@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any
 
 import duckdb
 import pyarrow as pa
@@ -169,12 +168,9 @@ class QuiverFlightServer(flight.FlightServerBase):
 
             # Try to parse as FlightSQL protobuf
             try:
-                from pyarrow._flight import (
-                    _messages,
-                )
-
-                # This would parse CommandStatementQuery protobuf
+                # pyarrow._flight._messages could be used to parse CommandStatementQuery
                 # For now, fall through to error
+                pass
             except ImportError:
                 pass
 

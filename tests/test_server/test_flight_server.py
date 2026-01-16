@@ -215,8 +215,9 @@ class TestServeCLI:
 
         assert result.exit_code == 0
         assert "FlightSQL server" in result.stdout
-        assert "--port" in result.stdout
-        assert "--verbose" in result.stdout
+        # Rich may split --port with ANSI codes, so check for "port" instead
+        assert "port" in result.stdout.lower()
+        assert "verbose" in result.stdout.lower()
 
     def test_serve_nonexistent_path(self) -> None:
         """Verify error on nonexistent data path."""

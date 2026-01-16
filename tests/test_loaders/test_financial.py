@@ -1,10 +1,10 @@
 """Tests for the financial data loader."""
 
-import pytest
 import pyarrow as pa
+import pytest
 
 from quiver.backends.duckdb import DuckDBBackend
-from quiver.loaders import FinancialLoader, LoadResult, TRADES_SCHEMA
+from quiver.loaders import TRADES_SCHEMA, FinancialLoader, LoadResult
 
 
 class TestFinancialLoader:
@@ -62,8 +62,8 @@ class TestFinancialLoader:
         assert all(p > 0 for p in close_prices)
 
         # High >= Low for each row
-        for h, l in zip(high_prices, low_prices):
-            assert h >= l, f"High ({h}) should be >= Low ({l})"
+        for high, low in zip(high_prices, low_prices):
+            assert high >= low, f"High ({high}) should be >= Low ({low})"
 
         # Prices in reasonable range (started around $50-200, shouldn't explode)
         all_prices = open_prices + high_prices + low_prices + close_prices
