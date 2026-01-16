@@ -4,10 +4,9 @@ These tests exercise the complete system: loading data, querying,
 and benchmarking across multiple backends.
 """
 
-import pytest
 
 from quiver.benchmark import BenchmarkRunner
-from quiver.loaders import FinancialLoader, ObservabilityLoader
+from quiver.loaders import FinancialLoader
 
 
 class TestFinancialWorkflow:

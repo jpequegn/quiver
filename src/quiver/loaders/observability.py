@@ -8,7 +8,6 @@ import pyarrow as pa
 from quiver.backends.base import Backend
 from quiver.loaders.base import LoadResult
 
-
 # Schema for the metrics table
 METRICS_SCHEMA = pa.schema(
     [

@@ -20,7 +20,6 @@ from quiver.config import (
 from quiver.loaders import FinancialLoader, ObservabilityLoader
 from quiver.output import OutputFormat, format_output
 
-
 # Global config cache
 _config: QuiverConfig | None = None
 _config_loaded: bool = False
@@ -320,11 +319,11 @@ def doctor() -> None:
         status, style, message = _check_backend_for_doctor(name)
 
         if status == "OK":
-            status_display = f"[green][OK][/green]"
+            status_display = "[green][OK][/green]"
         elif status == "SKIP":
-            status_display = f"[dim][SKIP][/dim]"
+            status_display = "[dim][SKIP][/dim]"
         else:
-            status_display = f"[red][FAIL][/red]"
+            status_display = "[red][FAIL][/red]"
             if name in LOCAL_BACKENDS:
                 has_failures = True
 
@@ -494,7 +493,10 @@ def query(
 
     if output is None:
         output_str = get_default_output()
-        output = OutputFormat(output_str) if output_str in OutputFormat.__members__.values() else OutputFormat.TABLE
+        if output_str in OutputFormat.__members__.values():
+            output = OutputFormat(output_str)
+        else:
+            output = OutputFormat.TABLE
 
     # Get host/token from config if not provided
     if host is None or token is None:

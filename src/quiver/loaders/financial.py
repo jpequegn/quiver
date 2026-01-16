@@ -8,7 +8,6 @@ import pyarrow as pa
 from quiver.backends.base import Backend
 from quiver.loaders.base import LoadResult
 
-
 # Schema for the trades table
 TRADES_SCHEMA = pa.schema(
     [

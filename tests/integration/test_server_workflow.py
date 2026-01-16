@@ -11,9 +11,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from quiver.backends import FlightSQLBackend, get_registry
+from quiver.backends import FlightSQLBackend
 from quiver_server import QuiverFlightServer
-
 
 # Use different ports for each test to avoid conflicts
 _port_counter = 28900

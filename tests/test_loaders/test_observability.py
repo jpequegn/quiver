@@ -1,10 +1,9 @@
 """Tests for the observability data loader."""
 
-import pytest
 import pyarrow as pa
 
 from quiver.backends.duckdb import DuckDBBackend
-from quiver.loaders import LoadResult, ObservabilityLoader, METRICS_SCHEMA
+from quiver.loaders import METRICS_SCHEMA, LoadResult, ObservabilityLoader
 from quiver.loaders.observability import METRIC_TYPES
 
 
